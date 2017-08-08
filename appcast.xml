@@ -2,7 +2,7 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"  xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>ProMultitouchExport</title>
-    <link>https://rawgit.com/Sodiet/test/master/appcast.xml</link>
+    <link>https://raw.githubusercontent.com/Sodiet/test/master/appcast.xml</link>
     <description>Tool for exporting projects from SketchApp to ProMultitouch</description>
     <language>en</language>
       <item>
