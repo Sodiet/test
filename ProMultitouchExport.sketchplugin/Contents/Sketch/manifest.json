@@ -6,6 +6,7 @@
   "homepage": "https://promultitouch.com/",
   "version" : "0.1",
   "author" : "",
+  "appcast": "https://raw.githubusercontent.com/Sodiet/test/master/appcast.xml",
   "commands" : [
     {
       "script" : "exporter.cocoascript",
