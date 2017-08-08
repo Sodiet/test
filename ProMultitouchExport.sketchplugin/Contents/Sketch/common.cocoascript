@@ -1,0 +1,315 @@
+function selectFolder() {
+  //open a window to select a folder to save to
+  var panel = [NSOpenPanel openPanel];
+  [panel setCanChooseDirectories:true];
+  [panel setCanCreateDirectories:true];
+
+  //checks if user clicks open in window
+  var clicked = [panel runModal];
+  if (clicked == NSFileHandlingPanelOKButton) {
+    var isDirectory = true;
+    var firstURL = [[panel URLs] objectAtIndex:0];
+    var unformattedURL = [NSString stringWithFormat:@"%@", firstURL];
+
+    //makes sure spaces aren't formatted to %20
+    var file_path = [unformattedURL stringByRemovingPercentEncoding];
+
+    //removes file:// from path
+    if (0 === file_path.indexOf("file://")) {
+       file_path = file_path.substring(7);
+       return file_path;
+    }
+  }
+  return "";
+}
+
+function componentToHEX(c) {
+    var hex = (c).toString(16);
+    return hex.length == 1 ? "0" + hex : hex;
+}
+
+function RGBAtoHEX(color) {
+  var alpha = Math.round(255 * color.alpha());
+  var red = Math.round(255 * color.red());
+  var green = Math.round(255 * color.green());
+  var blue = Math.round(255 * color.blue());
+  return "#" + componentToHEX(alpha) + componentToHEX(red) + componentToHEX(green) + componentToHEX(blue);
+}
+
+function isRectangle(item) {
+  var layers = item.layers ? item.layers()[0] : undefined;
+  var path = layers ? layers.path() : undefined;
+  var fillCheck = item.style().fill() ? item.style().fill().fillType() == 0 : true;
+
+  if (layers && path && layers.class() == "MSRectangleShape" && item.layers().count() < 2
+      && fillCheck && path.isClosed() && path.points().count() == 4)
+      return path.isRectangle();
+  return false;
+}
+
+function getColorOfTextItem(item) {
+  var border = item.style().border();
+  var fill = item.style().fill();
+  if (item.class() == "MSTextLayer") {
+    return fill ? fill.isEnabled() ? RGBAtoHEX(fill.color()) : RGBAtoHEX(item.textColor()): RGBAtoHEX(item.textColor())
+  }
+  else return "#ffffffff";
+}
+
+function getParentArtboard (item) {
+  var result = item;
+  if (result.class() == "MSArtboardGroup") return result;
+  if (selection[0].parentObject().class() == "MSPage") throw new NoArtboardException();
+  while(result.parentObject().class() != "MSArtboardGroup"){
+    result = result.parentObject();
+  }
+  return result.parentObject();
+}
+
+//returns most common size of artboards or selection, otherwise greatest height and width
+
+function getMostCommonSize()
+{
+  var arrayWidth = [], arrayHeight = [];
+  var modeMap = {};
+  var maxEl, maxCount = 1, modeCount = 0;
+  var tmpArtBoard;
+  if (selection.count() == 0)
+    for (var i = 0; i < artBoards.count(); i++) {
+      arrayWidth.push(artBoards[i].frame().width());
+      arrayHeight.push(artBoards[i].frame().height());
+    }
+  else
+    for (var i = 0; i < selection.count(); i++) {
+      tmpArtBoard = getParentArtboard(selection[i]);
+      log(tmpArtBoard)
+      arrayWidth.push(tmpArtBoard.frame().width());
+      arrayHeight.push(tmpArtBoard.frame().height());
+    }
+
+  if (arrayWidth.length == 0) return null;
+  maxEl = arrayWidth[0] + "*" + arrayHeight[0];
+
+  for(var i = 0; i < arrayWidth.length; i++) {
+    var el = arrayWidth[i] + "*" + arrayHeight[i];
+    if(modeMap[el] == null)
+      modeMap[el] = 1;
+    else
+      modeMap[el]++;
+    if(modeMap[el] > maxCount) {
+      maxEl = el;
+      maxCount = modeMap[el];
+    }
+  }
+
+  for (var i = 0; i < arrayWidth.length; i++) { //count() to length
+    modeCount += Number(modeMap[arrayWidth[i] + "*" + arrayHeight[i]]);
+  }
+  if (modeCount == Object.keys(modeMap).length)
+    return getMaxSize(arrayWidth, arrayHeight)
+  var result = maxEl.split("*");
+
+  return {
+    width : result[0],
+    height : result[1]
+  };
+}
+
+function getMaxSize(arrayWidth, arrayHeight) {
+  return {
+    width : arrayWidth.sort(compareNumbers)[0],
+    height : arrayHeight.sort(compareNumbers)[0]
+  };
+}
+
+function compareNumbers(a, b) {
+  return b - a;
+}
+
+function exportImage(item, name) {
+  var itemName = item.name();
+  var fileNames = [];
+  var path = filePath + "images/";
+  var mainFormat = "";
+
+  var tmp = item.duplicate(); /// Work with original item?
+
+  //Ingore opacity and color for masks
+  if (tmp.hasClippingMask() && tmp.style().fill().color()) {
+    tmp.style().fill().isEnabled = true;
+    tmp.style().fill().color().red = 255;
+    tmp.style().fill().color().green = 255;
+    tmp.style().fill().color().blue = 255;
+    tmp.style().fill().color().alpha = 100;
+    tmp.style().contextSettings().opacity = 1;
+  }
+
+  //Ignore shadows
+
+  if (tmp.style().shadows)
+    for (var i = 0; i < tmp.style().shadows().length; i++)
+      tmp.style().shadows()[i].isEnabled = false;
+
+  tmp.exportOptions().removeAllExportFormats();
+  var exportOptionImage = tmp.exportOptions().addExportFormat();
+  var exportOptionMIcon = tmp.exportOptions().addExportFormat();
+
+  if (tmp.style() && tmp.style().fill() && (tmp.style().fill().fillType() == 4)) mainFormat = "png"
+  else mainFormat = "svg"
+
+  exportOptionImage.scale = 1;
+  exportOptionImage.fileFormat = mainFormat;
+
+  exportOptionMIcon.scale = 128/Math.max(tmp.frame().width(), tmp.frame().height());
+  exportOptionMIcon.fileFormat = "jpg";
+
+  var fileNameImage = path + name + "." + mainFormat;
+  var fileNameMIcon = path + name + "." + mainFormat + ".jpg";
+  fileNames.push(fileNameImage, fileNameMIcon);
+
+  var slices = MSExportRequest.exportRequestsFromExportableLayer(tmp);
+  for (var j=0; j < slices.count(); j++) {
+    [docContext saveArtboardOrSlice:slices[j] toFile:fileNames[j]];
+  }
+
+  tmp.removeFromParent();
+
+  var newName = libMD5.fileMD5(path + name + "." + mainFormat); //add extension to name
+
+  [[NSFileManager defaultManager] removeItemAtPath:path + newName + "." + mainFormat error:nil];
+  [[NSFileManager defaultManager] moveItemAtPath:path + name + "." + mainFormat toPath:path + newName + "." + mainFormat error:null];
+
+  [[NSFileManager defaultManager] removeItemAtPath:path + newName + "." + mainFormat + ".jpg" error:nil];
+  [[NSFileManager defaultManager] moveItemAtPath:path + name + "." + mainFormat + ".jpg" toPath:path + newName + "." + mainFormat + ".jpg" error:null];
+
+  return newName + "." + mainFormat; //change function
+}
+
+function escapeCharacters(string) {
+  return replaceQuotes(string.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+}
+
+function replaceQuotes(string) {
+  var result = string;
+  while (result.indexOf('"') != -1 && result.indexOf("'") != -1) {
+    result = result.replace('"', "&quot;").replace("'", "&apos;");
+  }
+  return result;
+}
+
+function indent(lvl) {
+  var result = "";
+  for (var i = lvl; i > 0; i--) {
+    result += "    ";
+  }
+  return result;
+}
+
+function NoArtboardException() {
+  this.name= "Wrong Artboard";
+  this.message = "Please, add new or select existing Artboard";
+  this.stack = "";
+}
+
+function openExportDialog(context) {
+  var alert = COSAlertWindow.new();
+  alert.setMessageText("Export to ProMultitouch")
+  alert.setInformativeText("Export selected items into a ProMultitouch Project")
+  alert.addButtonWithTitle("Export");
+  alert.addButtonWithTitle("Cancel");
+  alert.setIcon(NSImage.alloc().initByReferencingFile(context.plugin.urlForResourceNamed("icon.png").path()));
+
+  var viewWidth = 400;
+  var viewHeight = 50;
+
+  /*var sizes = {
+    width: viewWidth,
+    height: viewHeight,
+    percentToPixels: function(percent, isItWidth){
+      if(isItWidth) return (percent/100) * this.width
+      else return (percent/100) * this.height;
+    }
+  }*/
+
+  //NSMakeRect(x, y, width, heigth)
+  // Main View
+  var view = NSView.alloc().initWithFrame(NSMakeRect(0, 0, viewWidth, viewHeight));
+
+  // Text Labels
+  //var infoLabel = NSTextField.alloc().initWithFrame(NSMakeRect(sizes.percentToPixels(0, true), sizes.percentToPixels(85, false),
+  //                                                            sizes.percentToPixels(25, true), sizes.percentToPixels(10, false)));
+
+  //var projectScaleLabel = NSTextField.alloc().initWithFrame(NSMakeRect(sizes.percentToPixels(0, true), sizes.percentToPixels(80, false),
+  //                                                                    sizes.percentToPixels(80, true), sizes.percentToPixels(28, false)));
+  var projectScaleLabel = NSTextField.alloc().initWithFrame(NSMakeRect(0, 30, 400, 15));
+
+  //var textScaleLabel = NSTextField.alloc().initWithFrame(NSMakeRect(sizes.percentToPixels(35, true), sizes.percentToPixels(65, false),
+  //                                                                  sizes.percentToPixels(25, true), sizes.percentToPixels(10, false)));
+
+  //Dropdown Lists
+  //var projectScaleList = NSPopUpButton.alloc().initWithFrame(NSMakeRect(sizes.percentToPixels(0, true), sizes.percentToPixels(50, false),
+  //                                                                      sizes.percentToPixels(25, true) , sizes.percentToPixels(11, false)));
+
+  var projectScaleList = NSPopUpButton.alloc().initWithFrame(NSMakeRect(0, 0, 100, 25))
+
+  //var textScaleList = NSPopUpButton.alloc().initWithFrame(NSMakeRect(sizes.percentToPixels(35, true), sizes.percentToPixels(50, false),
+  //                                                                      sizes.percentToPixels(25, true) , sizes.percentToPixels(11, false)));
+/*
+  infoLabel.setStringValue("Some info");
+  infoLabel.setSelectable(false);
+  infoLabel.setEditable(false);
+  infoLabel.setBezeled(false);
+  infoLabel.setDrawsBackground(false);
+*/
+  projectScaleLabel.setStringValue("Project's scale factor: ");
+  projectScaleLabel.setSelectable(false);
+  projectScaleLabel.setEditable(false);
+  projectScaleLabel.setBezeled(false);
+  projectScaleLabel.setDrawsBackground(false);
+/*
+  textScaleLabel.setStringValue("Text's scale factor: ");
+  textScaleLabel.setSelectable(false);
+  textScaleLabel.setEditable(false);
+  textScaleLabel.setBezeled(false);
+  textScaleLabel.setDrawsBackground(false);
+*/
+  [projectScaleList addItemWithTitle:"1x"];
+  [projectScaleList addItemWithTitle:"2x"];
+  [projectScaleList addItemWithTitle:"3x"];
+/*
+  [textScaleList addItemWithTitle:"1x"];
+  [textScaleList addItemWithTitle:"2x"];
+  [textScaleList addItemWithTitle:"3x"];
+*/
+  // Default values
+  projectScaleList.selectItemAtIndex(0);
+  //textScaleList.selectItemAtIndex(0);
+
+  //view.addSubview(infoLabel);
+  view.addSubview(projectScaleLabel);
+  //view.addSubview(textScaleLabel);
+  view.addSubview(projectScaleList);
+  //view.addSubview(textScaleList);
+
+  alert.addAccessoryView(view);
+
+  return [
+    alert.runModal(),
+    projectScaleList.titleOfSelectedItem()
+  ]
+}
+
+function pmtAlert(title, information, buttonName) {
+  var alert = COSAlertWindow.new();
+
+  alert.setMessageText(title);
+  alert.setInformativeText(information);
+  alert.addButtonWithTitle(buttonName);
+  alert.setIcon(NSImage.alloc().initByReferencingFile(context.plugin.urlForResourceNamed("icon.png").path()));
+
+  return alert;
+}
+
+function dummy() {
+  return false;
+}

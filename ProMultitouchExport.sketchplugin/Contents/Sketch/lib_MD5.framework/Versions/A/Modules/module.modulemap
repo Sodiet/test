@@ -1,0 +1,6 @@
+framework module lib_MD5 {
+  umbrella header "lib_MD5.h"
+
+  export *
+  module * { export * }
+}
