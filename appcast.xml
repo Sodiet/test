@@ -18,3 +18,212 @@
       </item>
   </channel>
 </rss>
+
+CEditor:
+
+CNetworkImporter asdf(this);
+    CNetworkExporter fdsa(this);
+    qDebug() << asdf.udpSocket->state();
+    fdsa.test();
+    qDebug() << asdf.udpSocket->state();
+
+
+
+#include "CNetworkImporter.h"
+
+#include <QString>
+#include <QTcpSocket>
+#include <QTcpServer>
+#include <QHostAddress>
+#include <QUdpSocket>
+#include <QDebug>
+#include <QFile>
+#include <QNetworkInterface>
+#include <QDataStream>
+#include <QDateTime>
+#include <QtSerialPort/QSerialPort>
+
+CNetworkImporter::CNetworkImporter(QObject *parent) : QObject(parent)
+  , udpSocket(new QUdpSocket(parent))
+  , tcpSocket(new QTcpSocket(parent))
+  , blockSize(512)
+  , projectName("testnew.pma")
+  , projectPath("C:/Test")
+{
+    qDebug() << udpSocket->bind(QHostAddress::Any, 45454, QUdpSocket::ShareAddress);
+    connect(udpSocket, SIGNAL(readyRead()),
+                this, SLOT(processPendingDatagrams()));
+}
+
+void CNetworkImporter::processPendingDatagrams()
+{
+    QByteArray datagram;
+    while(udpSocket->hasPendingDatagrams()) {
+        datagram.resize(udpSocket->pendingDatagramSize());
+        udpSocket->readDatagram(datagram.data(), datagram.size());
+        qDebug() << (tr("Got IP: \"%1\"").arg(datagram.data()));
+    }
+    connect(tcpSocket, &QIODevice::readyRead, this, &CNetworkImporter::readMsg);
+    tcpSocket->connectToHost(QString::fromUtf8(datagram.data(), datagram.size()), 45455);
+}
+
+void CNetworkImporter::readMsg()
+{
+    QDataStream in;
+    QFile newProject(projectPath + "/" + projectName);
+    blockSize = tcpSocket->bytesAvailable();
+    char *buffer = new char[blockSize];
+
+    in.setDevice(tcpSocket);
+    in.startTransaction();
+
+    if (newProject.exists()) {
+        qDebug() << newProject.fileName();
+        newProject.rename(projectPath + "/" + projectName,
+                          projectPath + "/" + projectName + "backup_" + QDateTime::currentDateTime().toString());
+        qDebug() << newProject.fileName();
+    }
+    // saving old file
+    newProject.open(QIODevice::WriteOnly | QIODevice::Append);
+    QDataStream downloadStream(&newProject);
+    in.readRawData(buffer, blockSize);
+    downloadStream.writeRawData(buffer, blockSize);
+    delete [] buffer;
+    newProject.close();
+}
+
+  
+  #ifndef CNETWORKIMPORTER_H
+#define CNETWORKIMPORTER_H
+
+#include <QObject>
+
+class QTcpSocket;
+class QUdpSocket;
+class QTcpServer;
+
+class CNetworkImporter : public QObject
+{
+    Q_OBJECT
+public:
+    explicit CNetworkImporter(QObject *parent = 0);
+    QString projectName;
+    QString projectPath;
+    QUdpSocket *udpSocket;
+private:
+    QTcpSocket *tcpSocket;
+    int blockSize;
+signals:
+
+
+public slots:
+    void readMsg();
+    void processPendingDatagrams();
+};
+
+#endif // CNETWORKIMPORTER_H
+
+  
+  #ifndef CNETWORKEXPORTER_H
+#define CNETWORKEXPORTER_H
+
+#include <QObject>
+
+class QTcpSocket;
+class QUdpSocket;
+class QTcpServer;
+
+class CNetworkExporter : public QObject
+{
+    Q_OBJECT
+public:
+    explicit CNetworkExporter(QObject *parent = 0);
+    void test();
+    QString projectPath;
+    QString projectName;
+
+private:
+    QUdpSocket *udpSocket;
+    QTcpSocket *tcpSocket;
+    QTcpServer *tcpServer;
+    int blockSize;
+
+signals:
+
+public slots:
+    void sendMsg();
+    void broadcastDatagram();
+};
+
+#endif // CNETWORKEXPORTER_H
+
+  
+  #include "CNetworkExporter.h"
+
+#include <QString>
+#include <QTcpSocket>
+#include <QTcpServer>
+#include <QHostAddress>
+#include <QUdpSocket>
+#include <QDebug>
+#include <QFile>
+#include <QNetworkInterface>
+#include <QDataStream>
+#include <QDateTime>
+
+
+CNetworkExporter::CNetworkExporter(QObject *parent) : QObject(parent)
+  , udpSocket(new QUdpSocket(this))
+  , tcpSocket(new QTcpSocket(this))
+  , tcpServer(new QTcpServer(this))
+  , blockSize(512)
+  , projectName("test.pma")
+  , projectPath("C:/Test")
+{
+}
+
+void CNetworkExporter::test()
+{
+    broadcastDatagram();
+}
+
+void CNetworkExporter::broadcastDatagram()
+{
+    if (!tcpServer->listen(QHostAddress::Any,45455))
+        qDebug() << "Can't start TCPServer";
+    connect(tcpServer, &QTcpServer::newConnection, this, &CNetworkExporter::sendMsg);
+
+    QList<QHostAddress> list = QNetworkInterface::allAddresses();
+    QHostAddress result;
+    for(int i=0; i<list.count(); i++) {
+        if(!list[i].isLoopback())
+            qDebug() << "i = " << i << " " << list[i].protocol();
+        if (list[i].protocol() == QAbstractSocket::IPv4Protocol){ // check for ip, that exist in one subnet with host + send IP (subnet) of host
+            result = list[i];
+            break;
+        }
+    }
+
+    qDebug() << (tr("Broadcasting to IP: ")) << result.toString();
+    QByteArray datagram = result.toString().toUtf8();
+    qDebug() << udpSocket->writeDatagram(datagram.data(), datagram.size(), QHostAddress::Broadcast, 45454);
+}
+
+void CNetworkExporter::sendMsg() {
+    char *buffer = new char[blockSize];
+    QFile projectFile("C:/Test/test.pma");
+    projectFile.open(QIODevice::ReadOnly);
+    qDebug() << "File's size for transfer: " << projectFile.size();
+    QDataStream txt(&projectFile);
+    QTcpSocket *clientConnection = tcpServer->nextPendingConnection();
+    connect(clientConnection, &QAbstractSocket::disconnected, clientConnection, &QObject::deleteLater);
+    while(!txt.atEnd())
+    {
+        txt.readRawData(buffer, 512);
+        clientConnection->write(QByteArray::fromRawData(buffer, blockSize));
+    }
+    delete [] buffer;
+    projectFile.close();
+    clientConnection->disconnectFromHost();
+}
+
